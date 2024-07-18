@@ -7,6 +7,7 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
+use std::collections::HashSet;
 use std::fs::create_dir_all;
 use std::io::Write;
 use std::path::PathBuf;
@@ -14,6 +15,7 @@ use std::{fs::File, path::Path};
 
 use core_plugin_interface::core_model::context_type::{ContextFieldType, ContextType};
 use core_plugin_interface::core_model_builder::builder::system_builder::BaseModelSystem;
+use core_plugin_interface::core_model_builder::typechecker::typ::TypecheckedSystem;
 use core_plugin_interface::core_model_builder::{
     ast::ast_types::{AstArgument, AstFieldType, AstModel, AstModule},
     error::ModelBuildingError,
@@ -64,6 +66,7 @@ use core_plugin_interface::core_model_builder::{
 pub fn generate_module_skeleton(
     module: &AstModule<Typed>,
     base_system: &BaseModelSystem,
+    typechecked_system: &TypecheckedSystem,
     out_file: impl AsRef<Path>,
 ) -> Result<(), ModelBuildingError> {
     let is_typescript = out_file
@@ -91,7 +94,7 @@ pub fn generate_module_skeleton(
     generate_context_definitions(base_system)?;
 
     if is_typescript {
-        generate_module_definitions(module)?;
+        generate_module_definitions(module, typechecked_system)?;
     }
 
     // We don't want to overwrite any user files
@@ -338,7 +341,24 @@ fn generate_context_definitions(base_system: &BaseModelSystem) -> Result<(), Mod
     Ok(())
 }
 
-fn generate_module_definitions(module: &AstModule<Typed>) -> Result<(), ModelBuildingError> {
+fn generate_module_definitions(
+    module: &AstModule<Typed>,
+    typechecked_system: &TypecheckedSystem,
+) -> Result<(), ModelBuildingError> {
+    let _external_return_types: HashSet<_> = module
+        .methods
+        .iter()
+        .flat_map(|method| {
+            let return_type = &method.return_type;
+
+            return_type.module_name().and_then(|module_name| {
+                return_type
+                    .get_underlying_typename(&typechecked_system.types)
+                    .map(|typ| (module_name, typ))
+            })
+        })
+        .collect();
+
     let generated_dir = PathBuf::from("generated");
 
     create_dir_all(&generated_dir)?;
@@ -505,6 +525,7 @@ fn typescript_base_type(exo_type_name: &str) -> String {
 mod tests {
     use super::*;
     use codemap::CodeMap;
+    use core_plugin_interface::core_model::mapped_arena::MappedArena;
     use core_plugin_interface::core_model_builder::ast::ast_types::{
         AstField, AstFieldType, AstModel, AstModelKind, AstModule,
     };
@@ -649,7 +670,14 @@ mod tests {
             fs::remove_dir_all(generated_dir).unwrap();
         }
 
-        generate_module_definitions(&module).unwrap();
+        generate_module_definitions(
+            &module,
+            &TypecheckedSystem {
+                types: MappedArena::default(),
+                modules: MappedArena::default(),
+            },
+        )
+        .unwrap();
 
         let module_file = generated_dir.join("TestModule.d.ts");
         assert!(

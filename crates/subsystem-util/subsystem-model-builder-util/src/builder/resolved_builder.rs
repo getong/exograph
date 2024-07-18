@@ -151,6 +151,7 @@ pub async fn build(
     process_script: impl Fn(
         &AstModule<Typed>,
         &BaseModelSystem,
+        &TypecheckedSystem,
         &Path,
     ) -> Result<(String, Vec<u8>), ModelBuildingError>,
 ) -> Result<ResolvedModuleSystem, ModelBuildingError> {
@@ -180,6 +181,7 @@ async fn resolve(
     process_script: impl Fn(
         &AstModule<Typed>,
         &BaseModelSystem,
+        &TypecheckedSystem,
         &Path,
     ) -> Result<(String, Vec<u8>), ModelBuildingError>,
 ) -> Result<ResolvedModuleSystem, ModelBuildingError> {
@@ -222,6 +224,7 @@ async fn resolve_modules(
     process_script: impl Fn(
         &AstModule<Typed>,
         &BaseModelSystem,
+        &TypecheckedSystem,
         &Path,
     ) -> Result<(String, Vec<u8>), ModelBuildingError>,
 ) -> Result<MappedArena<ResolvedModule>, ModelBuildingError> {
@@ -235,7 +238,7 @@ async fn resolve_modules(
                 module,
                 base_system,
                 annotation_name,
-                &typechecked_system.types,
+                typechecked_system,
                 errors,
                 &mut resolved_modules,
                 &process_script,
@@ -251,12 +254,13 @@ async fn resolve_module(
     module: &AstModule<Typed>,
     base_system: &BaseModelSystem,
     annotation_name: String,
-    types: &MappedArena<Type>,
+    typechecked_system: &TypecheckedSystem,
     errors: &mut Vec<Diagnostic>,
     resolved_modules: &mut MappedArena<ResolvedModule>,
     process_script: &impl Fn(
         &AstModule<Typed>,
         &BaseModelSystem,
+        &TypecheckedSystem,
         &Path,
     ) -> Result<(String, Vec<u8>), ModelBuildingError>,
 ) -> Result<(), ModelBuildingError> {
@@ -273,7 +277,8 @@ async fn resolve_module(
     source_path.pop();
     source_path.push(&module_relative_path);
 
-    let (script_path, bundled_script) = process_script(module, base_system, &source_path)?;
+    let (script_path, bundled_script) =
+        process_script(module, base_system, typechecked_system, &source_path)?;
 
     fn extract_intercept_annot<'a>(
         annotations: &'a AnnotationMap,
@@ -281,6 +286,8 @@ async fn resolve_module(
     ) -> Option<&'a AstExpr<Typed>> {
         annotations.get(key).map(|a| a.as_single())
     }
+
+    let types = &typechecked_system.types;
 
     resolved_modules.add(
         &module.name,
@@ -554,8 +561,10 @@ mod tests {
     };
     use codemap::CodeMap;
     use core_model_builder::{
-        ast::ast_types::AstModule, builder::system_builder::BaseModelSystem,
-        error::ModelBuildingError, typechecker::Typed,
+        ast::ast_types::AstModule,
+        builder::system_builder::BaseModelSystem,
+        error::ModelBuildingError,
+        typechecker::{typ::TypecheckedSystem, Typed},
     };
 
     use super::{build, ResolvedModuleSystem};
@@ -613,6 +622,7 @@ mod tests {
     fn process_script(
         _module: &AstModule<Typed>,
         _base_system: &BaseModelSystem,
+        _typechecked_system: &TypecheckedSystem,
         path: &Path,
     ) -> Result<(String, Vec<u8>), ModelBuildingError> {
         Ok((path.to_str().unwrap().to_string(), vec![]))
